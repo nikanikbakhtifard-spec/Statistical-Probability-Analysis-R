@@ -1,0 +1,381 @@
+---
+title: "L17 — Evaluative Exercise 2"
+subtitle: "Block 2 · Probability · In-class exercise"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center")
+```
+
+# The data {-}
+
+`L17_transactions.csv` records 12,000 card transactions collected over sixty days
+by a payment processor, 200 on each day. Each transaction was audited afterwards,
+so its true status is known; independently of the audit, an automatic detector had
+raised, or not raised, an alert at the moment of payment.
+
+| Column | Meaning |
+|---|---|
+| `txn_id` | Identifier of the transaction |
+| `day` | Day of the window, 1 to 60 |
+| `minute` | Minute of the day at which the payment was made, 0 to 1439 |
+| `weekend` | Whether the day was a weekend day |
+| `channel` | `web` (online), `app` (mobile app) or `pos` (card terminal in a shop) |
+| `amount` | Amount of the transaction, in euros |
+| `fraud` | 1 if the audit found the transaction fraudulent |
+| `alert` | 1 if the detector raised an alert |
+
+Throughout, one transaction is drawn at random from the 12,000. The exercises
+use five events:
+
+| Event | The transaction… | In the file |
+|---|---|---|
+| $F$ | is fraudulent | `fraud == 1` |
+| $A$ | raised an alert | `alert == 1` |
+| $W$ | came from the web channel | `channel == "web"` |
+| $S$ | came from a card terminal in a shop | `channel == "pos"` |
+| $E$ | occurred on a weekend day | `weekend == "yes"` |
+
+$F^c$ and $A^c$ are the complements of $F$ and $A$: the transaction is honest, no
+alert was raised. The prevalence of fraud is $\pi = P(F)$.
+
+The detector was certified on a separate set, where it was found that
+$P(A \mid F) = 0.92$ (sensitivity) and $P(A^c \mid F^c) = 0.97$
+(specificity).
+
+Four exercises. Fill the chunks; the questions that close each one are there for
+you to check your own understanding, and are not handed in.
+
+```{r import}
+tx <- read.csv("L17_transactions.csv", stringsAsFactors = FALSE)
+
+str(tx)
+```
+
+---
+
+# Exercise 1 — Conditioning and independence
+
+Estimate probabilities by relative frequencies in the file.
+
+1. Compute $P(A)$ and the conditional probabilities $P(A \mid W)$ and
+   $P(A \mid S)$.
+2. Check the product rule on two pairs of events: compare $P(A \cap W)$ with
+   $P(A)\,P(W)$, and $P(A \cap E)$ with $P(A)\,P(E)$. For each pair compute the
+   difference between the two, and the same difference as a percentage of the
+   product — for the first pair, $100\,[P(A \cap W) - P(A)P(W)] \,/\, [P(A)P(W)]$.
+
+```{r ex1}
+# Validate the supplied portfolio without altering it.
+stopifnot(nrow(tx) == 12000, ncol(tx) == 8, !anyNA(tx),
+          identical(sort(unique(tx$day)), 1:60), all(table(tx$day) == 200),
+          sum(tx$fraud) == 189, sum(tx$alert) == 545,
+          all(tx$fraud %in% 0:1), all(tx$alert %in% 0:1))
+print(data.frame(Transactions = nrow(tx), Variables = ncol(tx),
+                 Days = length(unique(tx$day)), Transactions_per_day = 200,
+                 Missing_values = sum(is.na(tx)), Frauds = sum(tx$fraud),
+                 Alerts = sum(tx$alert)), row.names = FALSE)
+
+# 1. Each conditional probability uses only its conditioning group.
+A <- tx$alert == 1
+W <- tx$channel == "web"
+S <- tx$channel == "pos"
+E <- tx$weekend == "yes"
+p_A <- mean(A)
+print(data.frame(Probability = c("P(A)", "P(A | W)", "P(A | S)"),
+                 Numerator = c(sum(A), sum(A & W), sum(A & S)),
+                 Denominator = c(nrow(tx), sum(W), sum(S)),
+                 Value = c(p_A, mean(A[W]), mean(A[S]))),
+      row.names = FALSE, digits = 8)
+
+# 2. The professor's percentage formula uses the signed difference.
+intersection <- c(mean(A & W), mean(A & E))
+product <- c(p_A * mean(W), p_A * mean(E))
+difference <- intersection - product
+print(data.frame(Pair = c("A and W", "A and E"),
+                 Intersection_probability = intersection,
+                 Product_of_marginals = product,
+                 Signed_difference = difference,
+                 Absolute_difference = abs(difference),
+                 Percentage_difference = 100 * difference / product),
+      row.names = FALSE, digits = 8)
+# Empirical differences alone do not establish population dependence.
+
+```
+
+> **(a)** One of the two differences is the smaller. Is it still the smaller once
+> each is expressed as a percentage of its own product?
+>
+> **(b)** Neither pair satisfies the product rule exactly. Does that prove that
+> $A$ and $E$ are dependent? If not, what would be needed to decide?
+
+---
+
+# Exercise 2 — Bayes' theorem and the diagnostic quantities
+
+1. Build the 2×2 table of `fraud` by `alert`. From it estimate the sensitivity,
+   the specificity and the prevalence $\pi$ on this portfolio, compare the first
+   two with the certified 0.92 and 0.97, and count the false alarms and the frauds
+   that raised no alert.
+2. Using the **certified** values and the prevalence you have just estimated,
+   compute $P(A)$ from the law of total probability
+   $$P(A) = P(A \mid F)P(F) + P(A \mid F^c)P(F^c),$$
+   where $P(A \mid F^c) = 1 - 0.97$ and $P(F^c) = 1 - \pi$,
+   and then the positive predictive value $P(F \mid A)$ from Bayes' theorem.
+   Compare it with the value read directly off the table.
+
+```{r ex2}
+# 1. Rows are audit status; columns are detector alert status.
+tab <- table(fraud = factor(tx$fraud, levels = 0:1),
+             alert = factor(tx$alert, levels = 0:1))
+print(tab)
+TP <- unname(tab["1", "1"])
+TN <- unname(tab["0", "0"])
+FP <- unname(tab["0", "1"])
+FN <- unname(tab["1", "0"])
+print(data.frame(True_positives = TP, True_negatives = TN,
+                 False_alarms_FP = FP, Frauds_without_alert_FN = FN),
+      row.names = FALSE)
+
+sensitivity_observed <- TP / (TP + FN)
+specificity_observed <- TN / (TN + FP)
+prevalence <- (TP + FN) / sum(tab)
+sensitivity_certified <- 0.92
+specificity_certified <- 0.97
+print(data.frame(Quantity = c("Sensitivity: P(A | F)",
+                             "Specificity: P(no alert | no fraud)"),
+                 Observed = c(sensitivity_observed, specificity_observed),
+                 Certified = c(sensitivity_certified, specificity_certified),
+                 Observed_minus_certified =
+                   c(sensitivity_observed - sensitivity_certified,
+                     specificity_observed - specificity_certified)),
+      row.names = FALSE, digits = 8)
+cat(sprintf("Observed fraud prevalence P(F) = %d / %d = %.8f\n",
+            TP + FN, sum(tab), prevalence))
+
+# 2. Only this model calculation uses the certified detector rates.
+p_A_certified <- sensitivity_certified * prevalence +
+  (1 - specificity_certified) * (1 - prevalence)
+ppv_certified <- sensitivity_certified * prevalence / p_A_certified
+ppv_empirical <- TP / (TP + FP)
+print(data.frame(Basis = c("Certified rates + observed prevalence",
+                          "Empirical contingency table"),
+                 Alert_probability = c(p_A_certified, mean(A)),
+                 Positive_predictive_value = c(ppv_certified, ppv_empirical)),
+      row.names = FALSE, digits = 8)
+cat(sprintf("Empirical PPV minus certified-model PPV = %.8f\n",
+            ppv_empirical - ppv_certified))
+
+```
+
+> **(a)** State in words the difference between $P(A \mid F)$ and $P(F \mid A)$,
+> and give both numbers.
+>
+> **(b)** Using the counts of point 1, explain why the false alarms outnumber the
+> true ones.
+
+---
+
+# Exercise 3 — Two discrete models, and a continuous one
+
+1. Let $X$ be the number of fraudulent transactions among 200 independent ones,
+   each fraudulent with probability $\pi$ (the prevalence estimated above). Give
+   the distribution of $X$, compute $P(X = 0)$ and $P(X \le 2)$ with `dbinom` and
+   `pbinom` and $E(X)$ and $\mathrm{Var}(X)$ from their formulas; then recompute
+   the two probabilities under the Poisson model with the same mean, $200\pi$, and
+   compare.
+2. Count the alerts raised on each of the sixty days,
+   `tapply(tx$alert, tx$day, sum)`, and compute their mean and variance.
+3. Let $T$ be the waiting time in minutes between one alert and the next within a
+   day. The observed waiting times are extracted by
+
+   ```r
+   gap <- c()
+   for (d in 1:60) {
+     minutes <- sort(tx$minute[tx$alert == 1 & tx$day == d])
+     gap    <- c(gap, diff(minutes))
+   }
+   ```
+
+   Compute the mean $\bar t$ and the standard deviation of `gap`, and estimate
+   the rate of the exponential, in alerts per minute, by $\hat\lambda = 1/\bar t$.
+   Then estimate $P(T > 100)$ and $P(T > 200 \mid T > 100)$ by relative
+   frequencies among the gaps, and compute the model value $e^{-100\hat\lambda}$.
+
+```{r ex3}
+# 1. Under the stated independent, constant-prevalence model:
+# X ~ Binomial(200, prevalence); Poisson(200 * prevalence) approximates it.
+n_transactions <- 200
+lambda_count <- n_transactions * prevalence
+binomial_prob <- c(dbinom(0, size = n_transactions, prob = prevalence),
+                   pbinom(2, size = n_transactions, prob = prevalence))
+poisson_prob <- c(dpois(0, lambda = lambda_count),
+                  ppois(2, lambda = lambda_count))
+print(data.frame(Quantity = c("E(X) = n*pi", "Var(X) = n*pi*(1-pi)",
+                             "Poisson lambda = n*pi"),
+                 Value = c(lambda_count, lambda_count * (1 - prevalence),
+                           lambda_count)), row.names = FALSE, digits = 8)
+print(data.frame(Probability = c("P(X = 0)", "P(X <= 2)"),
+                 Binomial = binomial_prob, Poisson = poisson_prob,
+                 Poisson_minus_Binomial = poisson_prob - binomial_prob),
+      row.names = FALSE, digits = 8)
+
+# 2. Keep all sixty daily counts visible.
+daily_alerts <- tapply(tx$alert, tx$day, sum)
+print(daily_alerts)
+daily_mean <- mean(daily_alerts)
+daily_variance <- var(daily_alerts)
+print(data.frame(Mean_daily_alerts = daily_mean,
+                 Variance_daily_alerts = daily_variance,
+                 Variance_to_mean = daily_variance / daily_mean),
+      row.names = FALSE, digits = 8)
+cat(sprintf(paste0("Daily variance is %.3f times the mean; a Poisson model ",
+                   "has equal mean and variance. This descriptive comparison ",
+                   "does not verify the complete model.\n"),
+            daily_variance / daily_mean))
+
+# 3. Use the supplied loop exactly; no gaps cross day boundaries.
+gap <- c()
+for (d in 1:60) {
+  minutes <- sort(tx$minute[tx$alert == 1 & tx$day == d])
+  gap    <- c(gap, diff(minutes))
+}
+mean_gap <- mean(gap)
+sd_gap <- sd(gap)
+lambda_gap <- 1 / mean_gap
+p_gt100 <- mean(gap > 100)
+# The conditioning denominator counts only gaps already exceeding 100.
+p_gt200_given100 <- sum(gap > 200) / sum(gap > 100)
+exponential_100 <- exp(-100 * lambda_gap)
+print(data.frame(Number_of_gaps = length(gap), Mean_minutes = mean_gap,
+                 SD_minutes = sd_gap, Rate_per_minute = lambda_gap),
+      row.names = FALSE, digits = 8)
+print(data.frame(Quantity = c("Empirical P(T > 100)",
+                             "Empirical P(T > 200 | T > 100)",
+                             "Exponential exp(-100 * lambda)"),
+                 Value = c(p_gt100, p_gt200_given100, exponential_100),
+                 Difference_from_exponential =
+                   c(p_gt100 - exponential_100,
+                     p_gt200_given100 - exponential_100, 0)),
+      row.names = FALSE, digits = 8)
+cat(sprintf("Conditional calculation: %d / %d gaps.\n",
+            sum(gap > 200), sum(gap > 100)))
+cat(sprintf(paste0("The empirical probabilities differ from the fitted ",
+                   "exponential value by %.4f and %.4f. Within-day gaps omit ",
+                   "day-boundary intervals; %d zero-minute gap(s) reflect ",
+                   "minute-level ties. These comparisons do not establish ",
+                   "an exact continuous exponential model.\n"),
+            p_gt100 - exponential_100,
+            p_gt200_given100 - exponential_100, sum(gap == 0)))
+
+```
+
+> **(a)** Which of the Binomial and the Poisson is the exact distribution of $X$,
+> and under what conditions is the other a good approximation to it?
+>
+> **(b)** Which property of the Poisson do the mean and the variance of the daily
+> counts support?
+>
+> **(c)** The three quantities of point 3 are close to one another. Which property
+> of the exponential distribution does that illustrate, and what does it mean for
+> an operator who has already waited 100 minutes?
+
+---
+
+# Exercise 4 — Sampling distribution of the mean
+
+Treat the 12,000 transactions as the population, so that $\mu$ and $\sigma$ of
+`amount` are known parameters rather than estimates.
+
+1. Compute $\mu$, $\sigma$, the median and the skewness
+   $\frac{1}{N}\sum_i \big((y_i - \mu)/\sigma\big)^3$, where $y_1, \dots, y_N$
+   are the $N = 12{,}000$ amounts. Take $\sigma$ from `sd()`: with $N$ this large
+   its divisor $N - 1$ makes no visible difference.
+2. For $n = 5$, $n = 30$ and $n = 100$, draw 2000 samples and keep the mean of
+   each — `replicate(2000, mean(sample(tx$amount, 5)))` — and compare the standard
+   deviation of the 2000 means with $\sigma/\sqrt{n}$. Draw the four histograms
+   together with `par(mfrow = c(2, 2))`: the amounts, and the means for the three
+   sample sizes.
+3. Let $\hat{\pi}$ be the proportion of fraudulent transactions in a random
+   sample of $n$ of the 12,000, whose prevalence $\pi$ is known. Compute the
+   standard error $\sqrt{\pi(1-\pi)/n}$ for $n = 200$ and $n = 1000$, and check
+   the conditions $n\pi \ge 10$ and $n(1-\pi) \ge 10$ in both cases.
+
+```{r ex4, fig.height=6}
+# 1. Use sd() and the specified standardized third moment.
+mu <- mean(tx$amount)
+sigma <- sd(tx$amount)
+amount_median <- median(tx$amount)
+amount_skewness <- mean(((tx$amount - mu) / sigma)^3)
+print(data.frame(Mean_EUR = mu, SD_EUR = sigma, Median_EUR = amount_median,
+                 Skewness = amount_skewness), row.names = FALSE, digits = 8)
+
+# 2. sample() defaults to sampling without replacement, as in the example.
+set.seed(1717)
+sample_sizes <- c(5, 30, 100)
+sample_means <- lapply(sample_sizes, function(n) {
+  replicate(2000, mean(sample(tx$amount, n)))
+})
+names(sample_means) <- paste0("n", sample_sizes)
+simulation <- data.frame(
+  Sample_size = sample_sizes,
+  Repetitions = 2000,
+  Mean_of_sample_means = vapply(sample_means, mean, numeric(1)),
+  Empirical_SD = vapply(sample_means, sd, numeric(1)),
+  Theoretical_SE = sigma / sqrt(sample_sizes)
+)
+simulation$SD_minus_theoretical <- simulation$Empirical_SD -
+  simulation$Theoretical_SE
+simulation$SD_relative_difference_percent <-
+  100 * simulation$SD_minus_theoretical / simulation$Theoretical_SE
+print(simulation, row.names = FALSE, digits = 8)
+cat(paste0("The table compares simulated SDs with the requested sigma/sqrt(n). ",
+           "Monte Carlo variation is expected. Sampling without replacement ",
+           "also gives a small finite-population adjustment: multiply this SE ",
+           "by sqrt(1 - n/12000), because sigma was computed with sd().\n"))
+
+old_par <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2))
+par(mar = c(4, 4, 3, 1))
+hist(tx$amount, breaks = 30, col = "#91B9D6", border = "white",
+     main = "Original transaction amounts", xlab = "Amount (EUR)",
+     ylab = "Transactions")
+for (i in seq_along(sample_sizes)) {
+  hist(sample_means[[i]], breaks = 30, col = "#6AAE99", border = "white",
+       main = paste("Sample means: n =", sample_sizes[i]),
+       xlab = "Sample mean amount (EUR)", ylab = "Samples")
+}
+par(old_par)
+
+# 3. Check each Normal-approximation condition separately.
+proportion_n <- c(200, 1000)
+proportion_checks <- data.frame(
+  Sample_size = proportion_n,
+  Fraud_prevalence = prevalence,
+  SE_proportion = sqrt(prevalence * (1 - prevalence) / proportion_n),
+  n_pi = proportion_n * prevalence,
+  n_one_minus_pi = proportion_n * (1 - prevalence)
+)
+proportion_checks$Fraud_condition_ge10 <- proportion_checks$n_pi >= 10
+proportion_checks$Nonfraud_condition_ge10 <-
+  proportion_checks$n_one_minus_pi >= 10
+proportion_checks$Both_conditions_satisfied <-
+  proportion_checks$Fraud_condition_ge10 &
+  proportion_checks$Nonfraud_condition_ge10
+print(proportion_checks, row.names = FALSE, digits = 8)
+
+```
+
+> **(a)** How does the standard deviation of the sample means behave as $n$ goes
+> from 5 to 100, and what law does that follow?
+>
+> **(b)** At $n = 5$ the means are still visibly skewed. Is that consistent with
+> the Central Limit Theorem?
+>
+> **(c)** For which of the two sample sizes of point 3 is the Normal approximation
+> to $\hat{\pi}$ admissible, and what would you use for the other?
